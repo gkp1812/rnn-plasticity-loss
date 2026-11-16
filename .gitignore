@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+data/
+plasticity_out/
+smoke_out/
+*.zip
+!results/*.zip
