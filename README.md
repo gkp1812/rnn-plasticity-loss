@@ -13,7 +13,8 @@ The accompanying manuscript is in preparation.
 |---|---|
 | `rnn_plasticity.py` | Runs the experiments (single file, PyTorch). Resumes from checkpoints and writes one JSON file per run. |
 | `make_assets.py` | Reads the result files and produces every table, figure and number used in the manuscript, including the statistical tests. |
-| `results/results_main.zip` | Per-run result files (one JSON per run) and worker logs of the main design, the fresh-network references and the remedies. |
+| `results/results_part1.zip` | Sessions 01–03: the main design (three learning rates, four seeds). |
+| `results/results_part2.zip` | Sessions 04–07: fresh-network references, remedies, the fifth seed, Fashion-MNIST, the extended task sequence, the duplicate audit and the sample images. |
 | `requirements.txt` | Python dependencies. |
 
 ## Requirements
@@ -61,16 +62,20 @@ results; unfinished work continues with `--resume_zip <file>`.
 
 ## Reproducing the tables and figures
 
-`results/results_main.zip` contains one folder per compute session (`session01` ...
-`session06`), each with the result files and the worker logs. Unpack it and run:
+The results are split into two archives to stay within GitHub's file-size limit. Together
+they contain one folder per compute session (`session01` ... `session07`), each with the
+result files and the worker logs; `session07` also holds the duplicate audit (`audit.json`)
+and the sample images (`samples.npz`). Unpack both into the same folder and run:
 
 ```
-unzip results/results_main.zip -d results_unpacked
+unzip results/results_part1.zip -d results_unpacked
+unzip results/results_part2.zip -d results_unpacked
 python make_assets.py paper results_unpacked
 ```
 
-Result zips of later sessions are unpacked into further sub-folders of `results_unpacked`
-(for example `session07`). When a run appears in two sessions, the later one is used.
+Result zips of further sessions are unpacked into further sub-folders of `results_unpacked`.
+When a run appears in two sessions, the later one is used. Fashion-MNIST continual runs are
+restricted to seeds 0 and 1, the seeds completed for every configuration.
 
 This writes `paper/tables/*.tex`, `paper/figures/*.pdf` and `paper/numbers.tex`, and prints
 a check of the qualitative statements made in the manuscript.

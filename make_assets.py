@@ -48,13 +48,16 @@ plt.rcParams.update({"font.family": "serif", "font.serif": ["STIXGeneral", "Time
 W = 4.92  # 125 mm text width
 
 # ------------------------------------------------------------------ load
+FASHION_SEEDS = (0, 1)
 RUNS = {}
 for root in ROOTS:
     for f in sorted(glob.glob(os.path.join(root, "*", "results", "*.json"))):
         r = json.load(open(f))
         r.setdefault("remedy", "none")
-        r.setdefault("dataset", "mnist")
-        r.setdefault("tag", "")
+        r["dataset"] = r.get("dataset") or r.get("config", {}).get("dataset", "mnist")
+        r["tag"] = r.get("tag") or ""
+        if r["dataset"] == "fashion" and r["mode"] == "cont" and r["seed"] not in FASHION_SEEDS:
+            continue  # only seeds completed for every Fashion-MNIST configuration
         RUNS[r["name"]] = r
 RUNS = list(RUNS.values())
 G = collections.defaultdict(list)
@@ -440,6 +443,14 @@ if fash:
     out += ["\\hline", "\\end{tabular}"]
     write("fashion.tex", "\n".join(out) + "\n")
     setv("fashion-seeds", str(len(fseeds)))
+    setv("fashion-reset-seeds", str(len(cell("perm", "rnn", "tanh", mode="reset", dataset="fashion"))))
+    fr = lambda b, archs: [float(VALS["fashion-%s-%s-%s-R" % (b, a_, c)]) for a_ in archs for c in facts]
+    setv("fashion-rand-rec-Rmin", min(fr("rand", ["rnn", "lstm", "gru"])), "%.2f")
+    setv("fashion-rand-rec-Rmax", max(fr("rand", ["rnn", "lstm", "gru"])), "%.2f")
+    setv("fashion-perm-gated-Rmin", min(fr("perm", ["lstm", "gru"])), "%.2f")
+    setv("fashion-perm-gated-Rmax", max(fr("perm", ["lstm", "gru"])), "%.2f")
+    fresh_rand = [fresh("rand", a_, c, dataset="fashion") for a_ in ["rnn", "lstm", "gru"] for c in facts]
+    setv("fashion-rand-rec-freshmin", min(fresh_rand)); setv("fashion-rand-rec-freshmax", max(fresh_rand))
 else:
     write("fashion.tex", pending("Fashion-MNIST replication (retention per architecture and activation) is produced by the final run."))
 
@@ -582,6 +593,14 @@ if longruns:
         L = np.mean([lastk(r, "online_acc", 20) for r in rs])
         setv("long-%s-%s-R" % (arch, act), L / f0, "%.2f")
         setv("long-%s-%s-last" % (arch, act), L)
+    for arch, act in cfg:
+        rs = cell("perm", arch, act, tag="long")
+        for nm, kk, fm in [("acc", "online_acc", "%.3f"), ("usat", "unit_sat_10", "%.2f"), ("gsat", "gate_sat_02", "%.2f"),
+                           ("erank", "erank", "%.0f"), ("wnorm", "wnorm", "%.0f")]:
+            c = mean_curve(rs, kk)
+            for lab, a0, b0 in [("first", 0, 10), ("t200", 190, 200), ("last", -20, None)]:
+                setv("long-%s-%s-%s-%s" % (arch, act, nm, lab), float(np.nanmean(c[a0:b0])), fm)
+        setv("long-%s-%s-n" % (arch, act), str(len(rs)))
     setv("long-tasks", str(min(len(r["log"]) for r in longruns)))
     setv("long-seeds", str(len({r["seed"] for r in longruns})))
     axs[0].set_xlabel("Task"); axs[0].set_ylabel("Online accuracy"); axs[0].set_title("(a) accuracy")
@@ -610,7 +629,8 @@ if samp:
             for a in (a0, a1):
                 a.set_xticks([]); a.set_yticks([]); a.grid(False)
                 for s in a.spines.values(): s.set_visible(True); s.set_linewidth(0.4)
-        axs[2 * i, 0].set_ylabel(n[:6], fontsize=6); axs[2 * i + 1, 0].set_ylabel("perm.", fontsize=6)
+        nm = {"mnist": "MNIST", "fashion": "Fashion"}[n]
+        axs[2 * i, 0].set_ylabel(nm, fontsize=6); axs[2 * i + 1, 0].set_ylabel(nm + "\npermuted", fontsize=6)
     fig.subplots_adjust(left=0.05, right=0.995, top=0.99, bottom=0.01, wspace=0.05, hspace=0.08)
     fig.savefig(os.path.join(FIG, "samples.pdf")); plt.close(fig)
     write("samples.tex", "\\includegraphics[width=\\linewidth]{figures/samples.pdf}\n")
