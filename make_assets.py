@@ -10,6 +10,7 @@ import glob
 import json
 import math
 import os
+import re
 import sys
 
 import numpy as np
@@ -110,9 +111,74 @@ def setv(key, val, fmt="%.3f"):
     VALS[key] = (fmt % val) if not isinstance(val, str) else val
 
 
+# ---- full table borders
+"""Give every tabular full borders: vertical rules between all columns and a rule after every row."""
+
+def _split_spec(spec):
+    cols, i = [], 0
+    spec = spec.replace("|", "")
+    while i < len(spec):
+        c = spec[i]
+        if c in "lcr":
+            cols.append(c); i += 1
+        elif c in "pmb" and i + 1 < len(spec) and spec[i + 1] == "{":
+            j, d = i + 2, 1
+            while d:
+                d += {"{": 1, "}": -1}.get(spec[j], 0); j += 1
+            cols.append(spec[i:j]); i = j
+        elif c in "@>" and i + 1 < len(spec) and spec[i + 1] == "{":
+            j, d = i + 2, 1
+            while d:
+                d += {"{": 1, "}": -1}.get(spec[j], 0); j += 1
+            cols.append(spec[i:j]); i = j
+        else:
+            i += 1
+    return cols
+
+def gridify(tex):
+    def tab(m):
+        spec, body = m.group(1), m.group(2)
+        cols = _split_spec(spec)
+        newspec = "|" + "|".join(cols) + "|"
+        # multicolumn specs: right border always, left border when the cell starts the row
+        def mc(mm):
+            pre = mm.group(1)
+            first = pre.strip() == "" or pre.rstrip().endswith("\\\\") or pre.rstrip().endswith("\\hline")
+            inner = mm.group(3).replace("|", "")
+            return "%s\\multicolumn{%s}{%s%s|}" % (pre, mm.group(2), "|" if first else "", inner)
+        body = re.sub(r"(^|\\\\\s*|\\hline\s*|&\s*)\\multicolumn\{(\d+)\}\{([^}]*)\}", lambda mm: mc(mm), body)
+        # one rule after every row; no double rules
+        out, depth, i = [], 0, 0
+        while i < len(body):
+            ch = body[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            if depth == 0 and body.startswith("\\\\", i) and not body.startswith("\\\\[", i):
+                rest = body[i + 2:]
+                out.append("\\\\")
+                if not re.match(r"\s*\\(hline|cline)", rest):
+                    first = rest.split("&", 1)[0] if "&" in rest else "x"
+                    if first.strip() == "" and len(cols) > 1:
+                        out.append(" \\cline{2-%d}" % len(cols))   # inside a row group: leave the group label cell open
+                    else:
+                        out.append(" \\hline")
+                i += 2
+                continue
+            out.append(ch)
+            i += 1
+        body = "".join(out)
+        body = re.sub(r"\\hline(\s*\\hline)+", r"\\hline", body)
+        if not body.lstrip().startswith("\\hline"):
+            body = "\n\\hline" + body
+        return "\\begin{tabular}{%s}%s\\end{tabular}" % (newspec, body)
+    return re.sub(r"\\begin\{tabular\}\{((?:[^{}]|\{[^{}]*\})*)\}(.*?)\\end\{tabular\}", tab, tex, flags=re.S)
+
+
 def write(name, text):
     with open(os.path.join(TAB, name), "w") as f:
-        f.write(text)
+        f.write(gridify(text))
 
 
 def pending(what):
@@ -226,6 +292,8 @@ for arch, gates in [("lstm", ["i", "f", "o"]), ("gru", ["r", "z"])]:
     setv("mech-rand-%s-gsat-min" % arch, min(gs), "%.2f"); setv("mech-rand-%s-gsat-max" % arch, max(gs), "%.2f")
     for g in gates:
         setv("mech-rand-%s-gate-%s" % (arch, g), np.mean([lastk(r, "gate_sat_02_" + g) for c in ACTS for r in cell("rand", arch, c)]), "%.2f")
+setv("n-fashion-runs", str(sum(1 for r in RUNS if r["dataset"] == "fashion")))
+setv("n-long-runs", str(sum(1 for r in RUNS if r["tag"] == "long")))
 setv("n-grid", str(sum(1 for r in RUNS if r["mode"] == "cont" and r["remedy"] == "none" and r["dataset"] == "mnist" and r["tag"] == "")))
 setv("n-ref", str(sum(1 for r in RUNS if r["mode"] == "reset" and r["dataset"] == "mnist")))
 setv("n-rem", str(sum(1 for r in RUNS if r["remedy"] != "none")))
@@ -308,7 +376,7 @@ out = ["\\begin{tabular}{ll|ccccc}", "\\hline",
        "Benchmark & Arch. & ReLU & Leaky ReLU & ELU & SiLU & GELU\\\\", "\\hline"]
 for bench, arch, adj, med in wil_rows:
     out.append("%s & %s & %s\\\\" % (("Permutation" if bench == "perm" else "Reshuffling") if arch == ARCHS[0] else "", ARCH_LABEL[arch],
-                                  " & ".join("%+.2f (%s)" % (m, fp(p)) for m, p in zip(med, adj))))
+                                  " & ".join("\\makecell{%+.2f\\\\(%s)}" % (m, fp(p)) for m, p in zip(med, adj))))
     if arch == ARCHS[-1] and bench == "perm":
         out.append("\\hline")
 out += ["\\hline", "\\end{tabular}"]
@@ -319,7 +387,7 @@ REMD = {}
 for bench in ["perm", "rand"]:
     key = KEY[bench]
     out = ["\\begin{tabular}{ll|c|ccccc}", "\\hline",
-           "Arch. & Act. & None & L2-Init & L2-Init (gates) & L2-Init (cand.) & S\\&P & LayerNorm\\\\", "\\hline"]
+           "Arch. & Act. & None & L2-Init & \\makecell{L2-Init\\\\(gates)} & \\makecell{L2-Init\\\\(cand.)} & S\\&P & \\makecell{Layer-\\\\Norm}\\\\", "\\hline"]
     for arch in ["rnn", "lstm", "gru"]:
         for act in ["tanh", "relu"]:
             seeds = sorted({r["seed"] for r in cell(bench, arch, act, remedy="l2init_all")})
@@ -335,7 +403,7 @@ for bench in ["perm", "rand"]:
                 tt = stats.ttest_1samp(d, 0.0)
                 REMD[(bench, arch, act, rem)] = {"acc": float(np.mean(list(v.values()))), "d": float(d.mean()),
                                                  "p": float(tt.pvalue), "min": float(d.min()), "n": len(d)}
-                cols.append("%.3f (%+.3f)" % (np.mean(list(v.values())), d.mean()))
+                cols.append("\\makecell{%.3f\\\\(%+.3f)}" % (np.mean(list(v.values())), d.mean()))
                 setv("rem-%s-%s-%s-%s-d" % (bench, arch, act, rem), d.mean(), "%+.3f")
                 setv("rem-%s-%s-%s-%s-acc" % (bench, arch, act, rem), float(np.mean(list(v.values()))))
             setv("rem-%s-%s-%s-none-acc" % (bench, arch, act), float(np.mean(list(base.values()))))
@@ -349,6 +417,9 @@ adj = holm([p for _, p in allp])
 for (k, _), a in zip(allp, adj):
     REMD[k]["p_holm"] = float(a)
 setv("rem-n-tests", str(len(allp)))
+setv("rem-rand-snp-maxgain", max(v["d"] for k, v in REMD.items() if k[0] == "rand" and k[3] == "snp"), "%.2f")
+setv("rem-rand-snp-maxgain-pp", "%.0f" % (100 * max(v["d"] for k, v in REMD.items() if k[0] == "rand" and k[3] == "snp")))
+setv("rem-perm-l2-maxgain", max(v["d"] for k, v in REMD.items() if k[0] == "perm" and k[3] == "l2init_all"), "%.2f")
 for bench in ["perm", "rand"]:
     for rem in ["l2init_all", "snp", "layernorm"]:
         ds = [v["d"] for k, v in REMD.items() if k[0] == bench and k[3] == rem]
@@ -528,7 +599,7 @@ fig.savefig(os.path.join(FIG, "lr_sensitivity.pdf")); plt.close(fig)
 
 # Fig: mechanism time courses (label-reshuffling)
 METS = [("unit_sat_10", "Unit saturation"), ("gate_sat_02", "Gate saturation"), ("act_dormant", "Dormant units"), ("erank", "Effective rank")]
-fig, axs = plt.subplots(4, 3, figsize=(W, 4.9), sharex=True, sharey="row")
+fig, axs = plt.subplots(4, 3, figsize=(W, 4.3), sharex=True, sharey="row")
 for i, (mk, ml) in enumerate(METS):
     for j, arch in enumerate(["rnn", "lstm", "gru"]):
         ax = axs[i, j]
@@ -540,7 +611,7 @@ for i, (mk, ml) in enumerate(METS):
         if i == 0: ax.set_title(ARCH_LABEL[arch])
         if i == 3: ax.set_xlabel("Task")
     axs[i, 0].set_ylabel(ml)
-fig.subplots_adjust(left=0.105, right=0.995, top=0.96, bottom=0.145, wspace=0.08, hspace=0.14)
+fig.subplots_adjust(left=0.105, right=0.995, top=0.955, bottom=0.16, wspace=0.08, hspace=0.16)
 legend_bottom(fig, act_handles())
 fig.savefig(os.path.join(FIG, "mechanisms.pdf")); plt.close(fig)
 
@@ -602,6 +673,8 @@ if longruns:
                 setv("long-%s-%s-%s-%s" % (arch, act, nm, lab), float(np.nanmean(c[a0:b0])), fm)
         setv("long-%s-%s-n" % (arch, act), str(len(rs)))
     setv("long-tasks", str(min(len(r["log"]) for r in longruns)))
+    _lt = [100 * (1 - float(VALS["long-%s-tanh-R" % a_])) for a_ in ["lstm", "gru"]]
+    setv("long-gated-tanh-lossmin", "%.0f" % min(_lt)); setv("long-gated-tanh-lossmax", "%.0f" % max(_lt))
     setv("long-seeds", str(len({r["seed"] for r in longruns})))
     axs[0].set_xlabel("Task"); axs[0].set_ylabel("Online accuracy"); axs[0].set_title("(a) accuracy")
     axs[1].set_xlabel("Task"); axs[1].set_ylabel("Weight norm"); axs[1].set_title("(b) weight norm")
