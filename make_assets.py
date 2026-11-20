@@ -653,13 +653,14 @@ fig.savefig(os.path.join(FIG, "remedies.pdf")); plt.close(fig)
 longruns = [r for r in RUNS if r["tag"] == "long"]
 if longruns:
     cfg = sorted({(r["arch"], r["act"]) for r in longruns}, key=lambda t: (ARCHS.index(t[0]), ACTS.index(t[1])))
-    fig, axs = plt.subplots(1, 2, figsize=(W, 2.0))
+    fig, axs = plt.subplots(1, 3, figsize=(W, 2.0))
     lsty = {"rnn": ":", "lstm": "-", "gru": "--"}
     for arch, act in cfg:
         rs = cell("perm", arch, act, tag="long")
         c = smooth(mean_curve(rs, "online_acc"), 20)
         axs[0].plot(np.arange(len(c)) + 10, c, color=COL[act], ls=lsty[arch], label="%s, %s" % (ARCH_LABEL[arch], ACT_LABEL[act]))
         axs[1].plot(mean_curve(rs, "wnorm"), color=COL[act], ls=lsty[arch])
+        axs[2].plot(smooth(mean_curve(rs, "unit_sat_10"), 20), color=COL[act], ls=lsty[arch])
         f0 = fresh("perm", arch, act)
         L = np.mean([lastk(r, "online_acc", 20) for r in rs])
         setv("long-%s-%s-R" % (arch, act), L / f0, "%.2f")
@@ -678,7 +679,9 @@ if longruns:
     setv("long-seeds", str(len({r["seed"] for r in longruns})))
     axs[0].set_xlabel("Task"); axs[0].set_ylabel("Online accuracy"); axs[0].set_title("(a) accuracy")
     axs[1].set_xlabel("Task"); axs[1].set_ylabel("Weight norm"); axs[1].set_title("(b) weight norm")
-    fig.subplots_adjust(left=0.1, right=0.99, top=0.89, bottom=0.36, wspace=0.28)
+    axs[2].set_xlabel("Task"); axs[2].set_ylabel("Unit saturation"); axs[2].set_title("(c) candidate saturation")
+    for ax in axs: ax.set_xticks([0, 400, 800])
+    fig.subplots_adjust(left=0.11, right=0.99, top=0.89, bottom=0.36, wspace=0.45)
     fig.legend(*axs[0].get_legend_handles_labels(), loc="lower center", ncol=3, frameon=False)
     fig.savefig(os.path.join(FIG, "long_horizon.pdf")); plt.close(fig)
     write("long_horizon.tex", "\\includegraphics[width=\\linewidth]{figures/long_horizon.pdf}\n")
